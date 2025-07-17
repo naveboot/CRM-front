@@ -158,6 +158,10 @@ const OrganizationManagement: React.FC = () => {
       const newOrganization = await organizationService.createOrganization(createFormData);
       console.log('Organization created:', newOrganization);
 
+      // Immediately fetch the complete organization data to ensure we have all fields
+      const completeOrgData = await organizationService.getOrganization(newOrganization.id);
+      console.log('Complete organization data fetched:', completeOrgData);
+
       // Reload the user's organization data to get the updated information
       await loadUserOrganization();
       
@@ -194,6 +198,10 @@ const OrganizationManagement: React.FC = () => {
       console.log('Updating organization with data:', editFormData);
 
       await organizationService.updateOrganization(currentOrganization.id, editFormData);
+      
+      // Immediately fetch the updated organization data
+      const updatedOrgData = await organizationService.getOrganization(currentOrganization.id);
+      console.log('Updated organization data fetched:', updatedOrgData);
       
       // Reload organization data
       await loadUserOrganization();
