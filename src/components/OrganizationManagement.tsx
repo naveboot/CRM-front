@@ -20,7 +20,8 @@ import {
   User as UserIcon,
   Calendar,
   Globe,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useOrganization } from '../contexts/OrganizationContext';
@@ -36,11 +37,15 @@ const OrganizationManagement: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [operationLoading, setOperationLoading] = useState({
     create: false,
     update: false,
     addUser: false,
   });
+
+  // Local organization state to ensure immediate updates
+  const [displayOrganization, setDisplayOrganization] = useState(currentOrganization);
 
   const [createFormData, setCreateFormData] = useState<CreateOrganizationData>({
     name: '',
@@ -59,6 +64,11 @@ const OrganizationManagement: React.FC = () => {
   const [addUserEmail, setAddUserEmail] = useState('');
   const [members, setMembers] = useState<any[]>([]);
 
+  // Update display organization when context changes
+  useEffect(() => {
+    setDisplayOrganization(currentOrganization);
+  }, [currentOrganization]);
+
   // Load organization members
   useEffect(() => {
     if (currentOrganization) {
@@ -74,6 +84,36 @@ const OrganizationManagement: React.FC = () => {
       setMembers(membersData);
     } catch (err) {
       console.error('Failed to load members:', err);
+    }
+  };
+
+  const refreshOrganizationData = async () => {
+    if (!currentOrganization) return;
+    
+    try {
+      setRefreshing(true);
+      console.log('Refreshing organization data for ID:', currentOrganization.id);
+      
+      // Fetch fresh organization data
+      const freshOrgData = await organizationService.getOrganization(currentOrganization.id);
+      console.log('Fresh organization data:', freshOrgData);
+      
+      // Update display immediately
+      setDisplayOrganization({
+        ...currentOrganization,
+        ...freshOrgData,
+        avatar: currentOrganization.avatar, // Keep the generated avatar
+      });
+      
+      // Also update the context
+      await loadUserOrganization();
+      
+      showSuccessMessage('✅ Données de l\'organisation actualisées !');
+    } catch (err) {
+      console.error('Failed to refresh organization data:', err);
+      showErrorMessage('❌ Échec de l\'actualisation des données');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -99,12 +139,12 @@ const OrganizationManagement: React.FC = () => {
   };
 
   const resetEditForm = () => {
-    if (currentOrganization) {
+    if (displayOrganization) {
       setEditFormData({
-        name: currentOrganization.name,
-        email: currentOrganization.email || '',
-        address: currentOrganization.address || '',
-        phone: currentOrganization.phone || '',
+        name: displayOrganization.name,
+        email: displayOrganization.email || '',
+        address: displayOrganization.address || '',
+        phone: displayOrganization.phone || '',
       });
     }
   };
@@ -162,7 +202,19 @@ const OrganizationManagement: React.FC = () => {
       const completeOrgData = await organizationService.getOrganization(newOrganization.id);
       console.log('Complete organization data fetched:', completeOrgData);
 
-      // Reload the user's organization data to get the updated information
+      // Update display immediately with the fresh data
+      const displayData = {
+        ...completeOrgData,
+        avatar: completeOrgData.name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2),
+        role: 'owner' as const,
+        memberCount: 1,
+        plan: 'professional' as const,
+      };
+      
+      setDisplayOrganization(displayData);
+      console.log('Display organization updated:', displayData);
+
+      // Reload the user's organization data to get the updated information in context
       await loadUserOrganization();
       
       // Also reload members for the new organization
@@ -183,7 +235,7 @@ const OrganizationManagement: React.FC = () => {
   };
 
   const handleUpdateOrganization = async () => {
-    if (!currentOrganization) return;
+    if (!displayOrganization) return;
 
     const validationError = validateEditForm();
     if (validationError) {
@@ -197,13 +249,19 @@ const OrganizationManagement: React.FC = () => {
 
       console.log('Updating organization with data:', editFormData);
 
-      await organizationService.updateOrganization(currentOrganization.id, editFormData);
+      await organizationService.updateOrganization(displayOrganization.id, editFormData);
       
       // Immediately fetch the updated organization data
-      const updatedOrgData = await organizationService.getOrganization(currentOrganization.id);
+      const updatedOrgData = await organizationService.getOrganization(displayOrganization.id);
       console.log('Updated organization data fetched:', updatedOrgData);
       
-      // Reload organization data
+      // Update display immediately
+      setDisplayOrganization({
+        ...displayOrganization,
+        ...updatedOrgData,
+      });
+      
+      // Reload organization data in context
       await loadUserOrganization();
 
       setShowEditModal(false);
@@ -218,7 +276,7 @@ const OrganizationManagement: React.FC = () => {
   };
 
   const handleAddUser = async () => {
-    if (!currentOrganization || !addUserEmail.trim()) return;
+    if (!displayOrganization || !addUserEmail.trim()) return;
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addUserEmail)) {
       showErrorMessage('Format d\'email invalide.');
@@ -231,7 +289,7 @@ const OrganizationManagement: React.FC = () => {
 
       console.log('Adding user to organization:', addUserEmail);
 
-      await organizationService.addUserByEmail(currentOrganization.id, addUserEmail);
+      await organizationService.addUserByEmail(displayOrganization.id, addUserEmail);
       
       // Reload members
       await loadMembers();
@@ -292,7 +350,7 @@ const OrganizationManagement: React.FC = () => {
     }
   };
 
-  if (!currentOrganization) {
+  if (!displayOrganization) {
     return (
       <div className="p-6">
         <div className="flex justify-between items-center mb-8">
@@ -498,6 +556,14 @@ const OrganizationManagement: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <button
+            onClick={refreshOrganizationData}
+            disabled={refreshing}
+            className="bg-gradient-to-r from-gray-600 to-slate-600 text-white px-4 py-3 rounded-xl hover:from-gray-700 hover:to-slate-700 transition-all duration-300 flex items-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={refreshing ? 'animate-spin' : ''} />
+            <span>Actualiser</span>
+          </button>
+          <button
             onClick={() => setShowAddUserModal(true)}
             className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 flex items-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
           >
@@ -546,22 +612,22 @@ const OrganizationManagement: React.FC = () => {
         <div className="flex items-center space-x-6 mb-8">
           <div className="relative">
             <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl w-20 h-20 flex items-center justify-center text-white font-bold text-2xl shadow-2xl">
-              {currentOrganization.avatar}
+              {displayOrganization.avatar || displayOrganization.name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2)}
             </div>
             <div className="absolute -top-2 -right-2 bg-gradient-to-r from-emerald-400 to-cyan-500 rounded-full p-2">
               <CheckCircle size={16} className="text-white" />
             </div>
           </div>
           <div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">{currentOrganization.name}</h2>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">{displayOrganization.name}</h2>
             <div className="flex items-center space-x-4 text-gray-600">
               <span className="flex items-center space-x-1">
                 <Building size={16} />
-                <span>Organisation #{currentOrganization.id}</span>
+                <span>Organisation #{displayOrganization.id}</span>
               </span>
               <span className="flex items-center space-x-1">
                 <Calendar size={16} />
-                <span>Créée le {currentOrganization.created_at ? new Date(currentOrganization.created_at).toLocaleDateString('fr-FR') : 'N/A'}</span>
+                <span>Créée le {displayOrganization.created_at ? new Date(displayOrganization.created_at).toLocaleDateString('fr-FR') : 'N/A'}</span>
               </span>
             </div>
           </div>
@@ -575,7 +641,7 @@ const OrganizationManagement: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-blue-600">Email</p>
-                <p className="font-semibold text-gray-900">{currentOrganization.email || 'Non renseigné'}</p>
+                <p className="font-semibold text-gray-900">{displayOrganization.email || 'Non renseigné'}</p>
               </div>
             </div>
             <div className="flex items-center space-x-4 p-4 bg-green-50 rounded-xl border border-green-100">
@@ -584,7 +650,7 @@ const OrganizationManagement: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-green-600">Téléphone</p>
-                <p className="font-semibold text-gray-900">{currentOrganization.phone || 'Non renseigné'}</p>
+                <p className="font-semibold text-gray-900">{displayOrganization.phone || 'Non renseigné'}</p>
               </div>
             </div>
           </div>
@@ -595,7 +661,7 @@ const OrganizationManagement: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-purple-600">Adresse</p>
-                <p className="font-semibold text-gray-900">{currentOrganization.address || 'Non renseignée'}</p>
+                <p className="font-semibold text-gray-900">{displayOrganization.address || 'Non renseignée'}</p>
               </div>
             </div>
             <div className="flex items-center space-x-4 p-4 bg-orange-50 rounded-xl border border-orange-100">
@@ -606,6 +672,26 @@ const OrganizationManagement: React.FC = () => {
                 <p className="text-sm font-medium text-orange-600">Membres</p>
                 <p className="font-semibold text-gray-900">{members.length} membre(s)</p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Organization Info */}
+        <div className="mt-8 pt-6 border-t border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl">
+              <div className="text-2xl font-bold text-blue-600">{displayOrganization.id}</div>
+              <div className="text-sm text-gray-600">ID Organisation</div>
+            </div>
+            <div className="text-center p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl">
+              <div className="text-2xl font-bold text-green-600">{members.length}</div>
+              <div className="text-sm text-gray-600">Membres Actifs</div>
+            </div>
+            <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl">
+              <div className="text-2xl font-bold text-purple-600">
+                {displayOrganization.updated_at ? new Date(displayOrganization.updated_at).toLocaleDateString('fr-FR') : 'N/A'}
+              </div>
+              <div className="text-sm text-gray-600">Dernière Mise à Jour</div>
             </div>
           </div>
         </div>
